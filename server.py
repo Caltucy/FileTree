@@ -41,6 +41,7 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         params = parse_qs(parsed.query)
         path1 = params.get('path1', [''])[0]
         path2 = params.get('path2', [''])[0]
+        fast_mode = params.get('fastMode', ['true'])[0].lower() == 'true'
 
         if not path1 or not path2:
             self.send_json({'error': 'Both paths required'}, 400)
@@ -86,7 +87,7 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
 
         if tree1 and tree2:
             send_progress({'status': 'comparing', 'message': '正在比较差异...', 'progress': 75})
-            comparison = compare_trees(tree1, tree2)
+            comparison = compare_trees(tree1, tree2, fast_mode)
             send_progress({'status': 'done', 'comparison': comparison, 'progress': 100})
         else:
             send_progress({'status': 'error', 'message': '路径无效'})

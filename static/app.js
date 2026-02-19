@@ -3,6 +3,7 @@ let comparisonData = null;
 async function compare() {
     const path1 = document.getElementById('path1').value;
     const path2 = document.getElementById('path2').value;
+    const fastMode = document.getElementById('fastMode').checked;
 
     if (!path1 || !path2) {
         alert('请输入两个路径');
@@ -16,7 +17,7 @@ async function compare() {
     progressDiv.style.display = 'block';
     progressFill.style.width = '0%';
 
-    const eventSource = new EventSource(`/api/compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}`);
+    const eventSource = new EventSource(`/api/compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}&fastMode=${fastMode}`);
 
     eventSource.onmessage = (e) => {
         const data = JSON.parse(e.data);
