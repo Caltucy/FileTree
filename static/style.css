@@ -1,0 +1,149 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f5f5;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+h1 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.input-section {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.input-section > div {
+    flex: 1;
+}
+
+.input-section label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.input-section input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.input-section button {
+    padding: 8px 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    align-self: flex-end;
+}
+
+.input-section button:hover {
+    background: #0056b3;
+}
+
+.search-section {
+    margin-bottom: 15px;
+}
+
+.progress-section {
+    margin-bottom: 15px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background: #e0e0e0;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #007bff;
+    transition: width 0.3s;
+    width: 0%;
+}
+
+.progress-text {
+    margin-top: 5px;
+    font-size: 14px;
+    color: #666;
+}
+
+.search-section input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.tree-container {
+    display: flex;
+    gap: 10px;
+    min-height: 400px;
+}
+
+.tree-panel {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    overflow: auto;
+    max-height: 600px;
+}
+
+.tree-item {
+    padding: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tree-item:hover {
+    background: #f0f0f0;
+}
+
+.tree-item.folder::before {
+    content: '📁 ';
+}
+
+.tree-item.file::before {
+    content: '📄 ';
+}
+
+.tree-children {
+    margin-left: 20px;
+    display: none;
+}
+
+.tree-children.expanded {
+    display: block;
+}
+
+.status-same { color: #28a745; }
+.status-modified { color: #ffc107; }
+.status-only_left { color: #dc3545; }
+.status-only_right { color: #007bff; }
+
+.size-bar {
+    display: inline-block;
+    height: 10px;
+    background: #007bff;
+    margin-left: 10px;
+    border-radius: 2px;
+}

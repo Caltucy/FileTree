@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>文件树比较工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>文件树比较工具</h1>
+        <div class="input-section">
+            <div>
+                <label>路径1:</label>
+                <input type="text" id="path1" placeholder="输入第一个路径">
+            </div>
+            <div>
+                <label>路径2:</label>
+                <input type="text" id="path2" placeholder="输入第二个路径">
+            </div>
+            <button onclick="compare()">比较</button>
+        </div>
+        <div id="progress" class="progress-section" style="display:none">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="progress-text" class="progress-text">正在扫描...</div>
+        </div>
+        <div class="search-section">
+            <input type="text" id="search" placeholder="搜索文件..." oninput="filterTree()">
+        </div>
+        <div class="tree-container">
+            <div class="tree-panel" id="tree1"></div>
+            <div class="tree-panel" id="tree2"></div>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
