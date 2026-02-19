@@ -1,3 +1,5 @@
+from scanner import get_file_hash
+
 def compare_trees(tree1, tree2):
     """比较两个文件树"""
     if not tree1 or not tree2:
@@ -37,8 +39,24 @@ def compare_trees(tree1, tree2):
         result['modified1'] = tree1.get('modified')
         result['modified2'] = tree2.get('modified')
 
-        if tree1.get('hash') != tree2.get('hash'):
+        # 混合策略
+        size1 = tree1.get('size', 0)
+        size2 = tree2.get('size', 0)
+        time1 = tree1.get('modified')
+        time2 = tree2.get('modified')
+
+        if size1 != size2:
+            # 策略1: 大小不同 → 直接标记已修改
             result['status'] = 'modified'
+        elif time1 == time2:
+            # 策略2: 大小相同 + 时间相同 → 标记相同（跳过哈希）
+            result['status'] = 'same'
+        else:
+            # 策略3: 大小相同 + 时间不同 → 计算哈希（可疑）
+            hash1 = tree1.get('hash') or get_file_hash(tree1['path'])
+            hash2 = tree2.get('hash') or get_file_hash(tree2['path'])
+            if hash1 != hash2:
+                result['status'] = 'modified'
 
     return result
 

@@ -2,6 +2,7 @@ import json
 import os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor
 from scanner import scan_directory
 from comparator import compare_trees
 
@@ -56,21 +57,32 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
             self.wfile.write(f"data: {json.dumps(msg)}\n\n".encode())
             self.wfile.flush()
 
-        file_count1 = [0]
+        # 双线程扫描
+        progress_data = {'path1': 0, 'path2': 0}
+
         def progress1(count):
-            file_count1[0] = count
-            send_progress({'status': 'scanning', 'message': f'正在扫描路径1... ({count}个文件)', 'progress': 10})
+            progress_data['path1'] = count
+            send_progress({
+                'status': 'scanning',
+                'message': f'路径1: {count}个文件 | 路径2: {progress_data["path2"]}个文件',
+                'progress': 20
+            })
 
-        send_progress({'status': 'scanning', 'message': '开始扫描路径1...', 'progress': 5})
-        tree1 = scan_directory(path1, progress1)
-
-        file_count2 = [0]
         def progress2(count):
-            file_count2[0] = count
-            send_progress({'status': 'scanning', 'message': f'正在扫描路径2... ({count}个文件)', 'progress': 40})
+            progress_data['path2'] = count
+            send_progress({
+                'status': 'scanning',
+                'message': f'路径1: {progress_data["path1"]}个文件 | 路径2: {count}个文件',
+                'progress': 20
+            })
 
-        send_progress({'status': 'scanning', 'message': '开始扫描路径2...', 'progress': 35})
-        tree2 = scan_directory(path2, progress2)
+        send_progress({'status': 'scanning', 'message': '开始扫描...', 'progress': 5})
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future1 = executor.submit(scan_directory, path1, progress1)
+            future2 = executor.submit(scan_directory, path2, progress2)
+            tree1 = future1.result()
+            tree2 = future2.result()
 
         if tree1 and tree2:
             send_progress({'status': 'comparing', 'message': '正在比较差异...', 'progress': 75})

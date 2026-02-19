@@ -56,7 +56,16 @@ function renderTree() {
 }
 
 function buildTreeHTML(node, side) {
-    const status = node.status || 'same';
+    let status = node.status || 'same';
+
+    // 根据侧边调整状态显示
+    if (status === 'only_left' && side === 'right') {
+        return ''; // 右侧不显示只在左侧的项
+    }
+    if (status === 'only_right' && side === 'left') {
+        return ''; // 左侧不显示只在右侧的项
+    }
+
     const isDir = node.is_dir;
     const name = node.name;
 
