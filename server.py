@@ -1,14 +1,20 @@
 import json
 import os
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+import sys
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from scanner import scan_directory
 from comparator import compare_trees
 
 class FileTreeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=os.path.dirname(__file__), **kwargs)
+
+    def log_message(self, format, *args):
+        if sys.stderr:
+            super().log_message(format, *args)
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -54,9 +60,12 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
 
+        send_lock = Lock()
+
         def send_progress(msg):
-            self.wfile.write(f"data: {json.dumps(msg)}\n\n".encode())
-            self.wfile.flush()
+            with send_lock:
+                self.wfile.write(f"data: {json.dumps(msg)}\n\n".encode())
+                self.wfile.flush()
 
         # 双线程扫描
         progress_data = {'path1': 0, 'path2': 0}
@@ -98,3 +107,19 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
+
+
+def run_server(port=8080):
+    server = ThreadingHTTPServer(('localhost', port), FileTreeHandler)
+    if sys.stdout:
+        print(f"服务器启动在 http://localhost:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        if sys.stdout:
+            print("\n服务器已停止")
+        server.shutdown()
+
+
+if __name__ == '__main__':
+    run_server()

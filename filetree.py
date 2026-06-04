@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import sys
 import webbrowser
-from http.server import HTTPServer
-from server import FileTreeHandler
+from urllib.parse import urlencode
+from server import run_server
 
 def main():
     port = 8080
+    url = f'http://localhost:{port}'
 
     # 解析命令行参数
     if len(sys.argv) > 2:
@@ -13,19 +14,11 @@ def main():
         path2 = sys.argv[2]
         print(f"路径1: {path1}")
         print(f"路径2: {path2}")
-
-    # 启动服务器
-    server = HTTPServer(('localhost', port), FileTreeHandler)
-    print(f"服务器启动在 http://localhost:{port}")
+        url = f'{url}?{urlencode({"path1": path1, "path2": path2})}'
 
     # 打开浏览器
-    webbrowser.open(f'http://localhost:{port}')
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n服务器已停止")
-        server.shutdown()
+    webbrowser.open(url)
+    run_server(port)
 
 if __name__ == '__main__':
     main()

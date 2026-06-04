@@ -1,42 +1,138 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>文件树比较工具</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileTree 备份审查</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>文件树比较工具</h1>
-        <div class="input-section">
+    <div class="app-shell">
+        <header class="app-header">
             <div>
-                <label>路径1:</label>
-                <input type="text" id="path1" placeholder="输入第一个路径">
+                <h1>FileTree</h1>
+                <div class="subtitle">备份审查与空间分析</div>
             </div>
-            <div>
-                <label>路径2:</label>
-                <input type="text" id="path2" placeholder="输入第二个路径">
-            </div>
-            <button onclick="compare()">比较</button>
-            <label style="margin-left: 10px;">
-                <input type="checkbox" id="fastMode" checked>
-                快速模式（仅元数据，不计算哈希）
-            </label>
-        </div>
-        <div id="progress" class="progress-section" style="display:none">
-            <div class="progress-bar">
-                <div id="progress-fill" class="progress-fill"></div>
-            </div>
-            <div id="progress-text" class="progress-text">正在扫描...</div>
-        </div>
-        <div class="search-section">
-            <input type="text" id="search" placeholder="搜索文件..." oninput="filterTree()">
-        </div>
-        <div class="tree-container">
-            <div class="tree-panel" id="tree1"></div>
-            <div class="tree-panel" id="tree2"></div>
-        </div>
+            <nav class="tabbar" aria-label="主视图">
+                <button class="tab-button active" type="button" data-view="diff">备份差异</button>
+                <button class="tab-button" type="button" data-view="space">空间占用</button>
+            </nav>
+        </header>
+
+        <main>
+            <section id="diffView" class="view active" aria-labelledby="diffTab">
+                <div class="control-band">
+                    <label class="path-field">
+                        <span>初始文件夹</span>
+                        <input type="text" id="path1" autocomplete="off" placeholder="D:\source">
+                    </label>
+                    <label class="path-field">
+                        <span>备份文件夹</span>
+                        <input type="text" id="path2" autocomplete="off" placeholder="E:\backup">
+                    </label>
+                    <label class="toggle-field">
+                        <input type="checkbox" id="fastMode" checked>
+                        <span>快速比较</span>
+                    </label>
+                    <button id="compareBtn" class="primary-button" type="button">开始审查</button>
+                </div>
+
+                <div id="progress" class="progress-section hidden">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <div id="progress-text" class="progress-text">正在扫描...</div>
+                </div>
+
+                <div id="diffSummary" class="summary-grid"></div>
+
+                <div class="review-layout">
+                    <aside class="side-panel">
+                        <div class="panel-title">审查队列</div>
+                        <div class="filter-stack" id="reviewFilters">
+                            <button class="filter-button active" type="button" data-filter="diff">全部差异</button>
+                            <button class="filter-button" type="button" data-filter="update">需要更新</button>
+                            <button class="filter-button" type="button" data-filter="copy">缺失备份</button>
+                            <button class="filter-button" type="button" data-filter="extra">备份多余</button>
+                            <button class="filter-button" type="button" data-filter="conflict">冲突</button>
+                        </div>
+                        <label class="search-field">
+                            <span>搜索</span>
+                            <input type="text" id="search" autocomplete="off" placeholder="文件名或路径">
+                        </label>
+                        <div id="actionList" class="action-list empty-state">等待审查结果</div>
+                    </aside>
+
+                    <section class="tree-workspace">
+                        <div class="tree-header">
+                            <div>
+                                <div class="panel-title">文件树对照</div>
+                                <div class="tree-meta" id="diffMeta">尚未比较</div>
+                            </div>
+                            <div class="tree-actions">
+                                <button id="expandDiffBtn" class="ghost-button" type="button">展开</button>
+                                <button id="collapseDiffBtn" class="ghost-button" type="button">折叠</button>
+                            </div>
+                        </div>
+                        <div class="tree-container two-pane">
+                            <div class="tree-panel">
+                                <h2>初始文件夹</h2>
+                                <div id="tree1" class="tree-root empty-state">暂无数据</div>
+                            </div>
+                            <div class="tree-panel">
+                                <h2>备份文件夹</h2>
+                                <div id="tree2" class="tree-root empty-state">暂无数据</div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <section id="spaceView" class="view" aria-labelledby="spaceTab">
+                <div class="control-band">
+                    <label class="path-field wide">
+                        <span>扫描路径</span>
+                        <input type="text" id="spacePath" autocomplete="off" placeholder="D:\">
+                    </label>
+                    <button id="scanSpaceBtn" class="primary-button" type="button">分析空间</button>
+                </div>
+
+                <div id="spaceSummary" class="summary-grid"></div>
+
+                <div class="space-layout">
+                    <section class="space-board">
+                        <div class="tree-header">
+                            <div>
+                                <div class="panel-title">目录占比</div>
+                                <div class="tree-meta" id="spaceMeta">尚未扫描</div>
+                            </div>
+                        </div>
+                        <div id="treemap" class="treemap empty-state">暂无数据</div>
+                    </section>
+
+                    <aside class="side-panel">
+                        <div class="panel-title">最大文件</div>
+                        <div id="largestFiles" class="action-list empty-state">暂无数据</div>
+                    </aside>
+                </div>
+
+                <section class="tree-workspace space-tree-section">
+                    <div class="tree-header">
+                        <div>
+                            <div class="panel-title">空间树</div>
+                            <div class="tree-meta">按大小降序</div>
+                        </div>
+                        <div class="tree-actions">
+                            <button id="expandSpaceBtn" class="ghost-button" type="button">展开</button>
+                            <button id="collapseSpaceBtn" class="ghost-button" type="button">折叠</button>
+                        </div>
+                    </div>
+                    <div id="spaceTree" class="tree-panel single-tree empty-state">暂无数据</div>
+                </section>
+            </section>
+        </main>
     </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

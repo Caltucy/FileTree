@@ -1,4 +1,3 @@
-import os
 import hashlib
 from pathlib import Path
 from datetime import datetime
@@ -24,38 +23,51 @@ def scan_directory(root_path, progress_callback=None, fast_mode=True):
 
     def build_tree(path):
         nonlocal file_count
+        is_dir = path.is_dir() and not path.is_symlink()
         item = {
             'name': path.name or str(path),
             'path': str(path),
-            'is_dir': path.is_dir(),
+            'is_dir': is_dir,
+            'is_symlink': path.is_symlink(),
         }
 
-        if path.is_file():
+        if not is_dir:
             try:
                 stat = path.stat()
                 item['size'] = stat.st_size
                 item['modified'] = datetime.fromtimestamp(stat.st_mtime).isoformat()
                 # 快速模式：先不计算哈希，留到比较时按需计算
                 item['hash'] = None if fast_mode else get_file_hash(path)
+                item['file_count'] = 1
+                item['dir_count'] = 0
                 file_count += 1
                 if progress_callback and file_count % 10 == 0:
                     progress_callback(file_count)
-            except:
+            except (PermissionError, FileNotFoundError, OSError):
                 item['size'] = 0
                 item['modified'] = None
                 item['hash'] = None
+                item['file_count'] = 1
+                item['dir_count'] = 0
+                item['inaccessible'] = True
         else:
             item['children'] = []
             total_size = 0
+            total_files = 0
+            total_dirs = 1
             try:
-                for child in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name)):
+                for child in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
                     child_item = build_tree(child)
                     if child_item:
                         item['children'].append(child_item)
                         total_size += child_item.get('size', 0)
+                        total_files += child_item.get('file_count', 0)
+                        total_dirs += child_item.get('dir_count', 0)
             except (PermissionError, FileNotFoundError, OSError):
-                pass
+                item['inaccessible'] = True
             item['size'] = total_size
+            item['file_count'] = total_files
+            item['dir_count'] = total_dirs
 
         return item
 
