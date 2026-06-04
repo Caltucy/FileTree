@@ -1,17 +1,28 @@
-from scanner import get_file_hash
+from scanner import ScanCancelled, get_file_hash
 
 
-def compare_trees(tree1, tree2, fast_mode=True):
+def compare_trees(tree1, tree2, fast_mode=True, cancel_event=None, progress_callback=None):
     """比较两个文件树，并附加面向备份审查的汇总信息。"""
     if not tree1 or not tree2:
         return None
 
-    result = _compare_nodes(tree1, tree2, fast_mode)
+    state = {'nodes': 0}
+    result = _compare_nodes(tree1, tree2, fast_mode, cancel_event, progress_callback, state)
     result['summary'] = summarize_comparison(result)
     return result
 
 
-def _compare_nodes(tree1, tree2, fast_mode):
+def _compare_nodes(tree1, tree2, fast_mode, cancel_event, progress_callback, state):
+    if cancel_event and cancel_event.is_set():
+        raise ScanCancelled()
+
+    state['nodes'] += 1
+    if progress_callback and state['nodes'] % 150 == 0:
+        progress_callback({
+            'nodes': state['nodes'],
+            'current_path': tree1.get('path') or tree2.get('path') or tree1.get('name'),
+        })
+
     result = _base_result(tree1, tree2)
 
     if tree1.get('is_dir') != tree2.get('is_dir'):
@@ -33,11 +44,11 @@ def _compare_nodes(tree1, tree2, fast_mode):
             c2 = children2.get(name)
 
             if c1 and c2:
-                child_result = _compare_nodes(c1, c2, fast_mode)
+                child_result = _compare_nodes(c1, c2, fast_mode, cancel_event, progress_callback, state)
             elif c1:
-                child_result = mark_only_in(c1, 'left')
+                child_result = mark_only_in(c1, 'left', cancel_event)
             else:
-                child_result = mark_only_in(c2, 'right')
+                child_result = mark_only_in(c2, 'right', cancel_event)
 
             children.append(child_result)
 
@@ -73,8 +84,8 @@ def _compare_nodes(tree1, tree2, fast_mode):
             'action': '复核后更新备份',
         })
     elif not fast_mode and time1 != time2:
-        hash1 = tree1.get('hash') or get_file_hash(tree1['path'])
-        hash2 = tree2.get('hash') or get_file_hash(tree2['path'])
+        hash1 = tree1.get('hash') or get_file_hash(tree1['path'], cancel_event=cancel_event)
+        hash2 = tree2.get('hash') or get_file_hash(tree2['path'], cancel_event=cancel_event)
         if hash1 is None or hash2 is None:
             result.update({
                 'status': 'modified',
@@ -128,8 +139,11 @@ def _base_result(tree1, tree2):
     return result
 
 
-def mark_only_in(tree, side):
+def mark_only_in(tree, side, cancel_event=None):
     """标记只存在于一侧的项。left 表示初始文件夹，right 表示备份文件夹。"""
+    if cancel_event and cancel_event.is_set():
+        raise ScanCancelled()
+
     side_index = 1 if side == 'left' else 2
     missing_index = 2 if side == 'left' else 1
     status = f'only_{side}'
@@ -158,7 +172,7 @@ def mark_only_in(tree, side):
         result['action'] = '确认是否保留或删除'
 
     if tree['is_dir']:
-        result['children'] = [mark_only_in(c, side) for c in tree.get('children', [])]
+        result['children'] = [mark_only_in(c, side, cancel_event) for c in tree.get('children', [])]
     else:
         result[f'modified{side_index}'] = tree.get('modified')
 

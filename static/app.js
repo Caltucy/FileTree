@@ -3,8 +3,14 @@ let spaceData = null;
 let reviewFilter = 'diff';
 let searchQuery = '';
 let searchTimer = null;
+let diffTaskId = null;
+let spaceTaskId = null;
+let diffEventSource = null;
+let spaceEventSource = null;
 
 const SPACE_TREE_LIMIT = 1800;
+const DIFF_TASK_KEY = 'filetree.diffTaskId';
+const SPACE_TASK_KEY = 'filetree.spaceTaskId';
 
 document.addEventListener('DOMContentLoaded', () => {
     hydratePathsFromQuery();
@@ -15,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('compareBtn').addEventListener('click', compare);
     document.getElementById('scanSpaceBtn').addEventListener('click', analyzeSpace);
+    document.getElementById('cancelDiffBtn').addEventListener('click', () => cancelTask('diff'));
+    document.getElementById('cancelSpaceBtn').addEventListener('click', () => cancelTask('space'));
 
     document.getElementById('search').addEventListener('input', (event) => {
         clearTimeout(searchTimer);
@@ -38,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('collapseDiffBtn').addEventListener('click', () => setDetailsOpen('#diffView', false));
     document.getElementById('expandSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', true));
     document.getElementById('collapseSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', false));
+
+    restoreTasks();
 });
 
 function hydratePathsFromQuery() {
@@ -71,55 +81,256 @@ async function compare() {
         return;
     }
 
-    const compareBtn = document.getElementById('compareBtn');
-    const progressDiv = document.getElementById('progress');
-    const progressFill = document.getElementById('progress-fill');
-    const progressText = document.getElementById('progress-text');
-
-    compareBtn.disabled = true;
-    progressDiv.classList.remove('hidden');
-    progressFill.style.width = '0%';
-    progressText.textContent = '正在扫描...';
+    setTaskUi('diff', {
+        status: 'queued',
+        progress: 0,
+        message: '正在创建审查任务...',
+        stats: {},
+    });
     setReviewLoading('正在审查...');
 
-    let completed = false;
-    const url = `/api/compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}&fastMode=${fastMode}`;
-    const eventSource = new EventSource(url);
+    try {
+        const url = `/api/task/start-compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}&fastMode=${fastMode}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!response.ok || data.error) {
+            throw new Error(data.error || '创建审查任务失败');
+        }
+        diffTaskId = data.task.id;
+        localStorage.setItem(DIFF_TASK_KEY, diffTaskId);
+        subscribeTask('diff', diffTaskId);
+    } catch (error) {
+        alert(error.message || '创建审查任务失败');
+        clearTaskState('diff');
+        setReviewLoading('审查失败');
+    }
+}
+
+async function restoreTasks() {
+    await restoreTask('diff', localStorage.getItem(DIFF_TASK_KEY));
+    await restoreTask('space', localStorage.getItem(SPACE_TASK_KEY));
+}
+
+async function restoreTask(kind, taskId) {
+    if (!taskId) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/task/status?id=${encodeURIComponent(taskId)}`);
+        const data = await response.json();
+        if (!response.ok || data.error) {
+            localStorage.removeItem(kind === 'diff' ? DIFF_TASK_KEY : SPACE_TASK_KEY);
+            return;
+        }
+
+        if (kind === 'diff') {
+            diffTaskId = taskId;
+        } else {
+            spaceTaskId = taskId;
+        }
+
+        handleTaskUpdate(kind, data.task);
+        if (!isTerminalTask(data.task)) {
+            subscribeTask(kind, taskId);
+        }
+    } catch {
+        localStorage.removeItem(kind === 'diff' ? DIFF_TASK_KEY : SPACE_TASK_KEY);
+    }
+}
+
+function subscribeTask(kind, taskId) {
+    closeTaskStream(kind);
+    const eventSource = new EventSource(`/api/task/events?id=${encodeURIComponent(taskId)}`);
+
+    if (kind === 'diff') {
+        diffEventSource = eventSource;
+    } else {
+        spaceEventSource = eventSource;
+    }
 
     eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-
-        if (data.status === 'scanning' || data.status === 'comparing') {
-            progressFill.style.width = `${data.progress}%`;
-            progressText.textContent = data.message;
-        } else if (data.status === 'done') {
-            completed = true;
-            progressFill.style.width = '100%';
-            progressText.textContent = '完成';
-            comparisonData = data.comparison;
-            renderDiff();
-            eventSource.close();
-            compareBtn.disabled = false;
-            setTimeout(() => progressDiv.classList.add('hidden'), 900);
-        } else if (data.status === 'error') {
-            completed = true;
-            alert(data.message || '路径无效');
-            eventSource.close();
-            compareBtn.disabled = false;
-            progressDiv.classList.add('hidden');
-            setReviewLoading('审查失败');
+        const task = JSON.parse(event.data);
+        handleTaskUpdate(kind, task);
+        if (isTerminalTask(task)) {
+            closeTaskStream(kind);
         }
     };
 
     eventSource.onerror = () => {
-        eventSource.close();
-        compareBtn.disabled = false;
-        progressDiv.classList.add('hidden');
-        if (!completed) {
-            alert('连接失败');
-            setReviewLoading('连接失败');
+        closeTaskStream(kind);
+        const activeId = kind === 'diff' ? diffTaskId : spaceTaskId;
+        if (activeId) {
+            setTaskUi(kind, {
+                status: 'running',
+                progress: getTaskProgressValue(kind),
+                message: '进度连接中断，刷新后可恢复',
+                stats: {},
+            });
         }
     };
+}
+
+function handleTaskUpdate(kind, task) {
+    setTaskUi(kind, task);
+
+    if (kind === 'diff') {
+        if (task.status === 'done' && task.result?.comparison) {
+            comparisonData = task.result.comparison;
+            renderDiff();
+            clearTaskState('diff', { keepProgress: true });
+        } else if (task.status === 'cancelled') {
+            setReviewLoading('审查已停止');
+            clearTaskState('diff', { keepProgress: true });
+        } else if (task.status === 'error') {
+            setReviewLoading(task.error || '审查失败');
+            clearTaskState('diff', { keepProgress: true });
+        }
+    } else if (kind === 'space') {
+        if (task.status === 'done' && task.result?.tree) {
+            spaceData = task.result.tree;
+            renderSpace();
+            clearTaskState('space', { keepProgress: true });
+        } else if (task.status === 'cancelled') {
+            document.getElementById('spaceMeta').textContent = '扫描已停止';
+            clearTaskState('space', { keepProgress: true });
+        } else if (task.status === 'error') {
+            document.getElementById('spaceMeta').textContent = task.error || '扫描失败';
+            clearTaskState('space', { keepProgress: true });
+        }
+    }
+}
+
+async function cancelTask(kind) {
+    const taskId = kind === 'diff' ? diffTaskId : spaceTaskId;
+    if (!taskId) {
+        return;
+    }
+
+    setTaskUi(kind, {
+        status: 'cancelling',
+        progress: getTaskProgressValue(kind),
+        message: '正在停止...',
+        stats: {},
+    });
+
+    try {
+        await fetch(`/api/task/cancel?id=${encodeURIComponent(taskId)}`);
+    } catch {
+        setTaskUi(kind, {
+            status: 'error',
+            progress: getTaskProgressValue(kind),
+            message: '停止请求失败',
+            stats: {},
+        });
+    }
+}
+
+function closeTaskStream(kind) {
+    const source = kind === 'diff' ? diffEventSource : spaceEventSource;
+    if (source) {
+        source.close();
+    }
+    if (kind === 'diff') {
+        diffEventSource = null;
+    } else {
+        spaceEventSource = null;
+    }
+}
+
+function clearTaskState(kind, options = {}) {
+    closeTaskStream(kind);
+    if (kind === 'diff') {
+        diffTaskId = null;
+        localStorage.removeItem(DIFF_TASK_KEY);
+        document.getElementById('compareBtn').disabled = false;
+        document.getElementById('cancelDiffBtn').disabled = true;
+    } else {
+        spaceTaskId = null;
+        localStorage.removeItem(SPACE_TASK_KEY);
+        document.getElementById('scanSpaceBtn').disabled = false;
+        document.getElementById('cancelSpaceBtn').disabled = true;
+    }
+
+    if (!options.keepProgress) {
+        getTaskElements(kind).section.classList.add('hidden');
+    }
+}
+
+function setTaskUi(kind, task) {
+    const elements = getTaskElements(kind);
+    const progress = Number(task.progress) || 0;
+
+    elements.section.classList.remove('hidden');
+    elements.fill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+    elements.text.textContent = task.message || getTaskStatusLabel(task.status);
+    elements.detail.textContent = formatTaskDetail(task);
+    elements.startButton.disabled = !isTerminalTask(task) && task.status !== 'error';
+    elements.cancelButton.disabled = isTerminalTask(task) || task.status === 'queued';
+}
+
+function getTaskElements(kind) {
+    if (kind === 'diff') {
+        return {
+            section: document.getElementById('progress'),
+            fill: document.getElementById('progress-fill'),
+            text: document.getElementById('progress-text'),
+            detail: document.getElementById('progress-detail'),
+            startButton: document.getElementById('compareBtn'),
+            cancelButton: document.getElementById('cancelDiffBtn'),
+        };
+    }
+    return {
+        section: document.getElementById('spaceProgress'),
+        fill: document.getElementById('spaceProgressFill'),
+        text: document.getElementById('spaceProgressText'),
+        detail: document.getElementById('spaceProgressDetail'),
+        startButton: document.getElementById('scanSpaceBtn'),
+        cancelButton: document.getElementById('cancelSpaceBtn'),
+    };
+}
+
+function getTaskProgressValue(kind) {
+    const width = getTaskElements(kind).fill.style.width || '0';
+    return Number(width.replace('%', '')) || 0;
+}
+
+function isTerminalTask(task) {
+    return ['done', 'error', 'cancelled'].includes(task.status);
+}
+
+function getTaskStatusLabel(status) {
+    const labels = {
+        queued: '等待开始',
+        running: '正在运行',
+        cancelling: '正在停止',
+        done: '完成',
+        error: '失败',
+        cancelled: '已停止',
+    };
+    return labels[status] || status || '';
+}
+
+function formatTaskDetail(task) {
+    const stats = task.stats || {};
+    if (task.type === 'compare') {
+        const left = stats.path1 || {};
+        const right = stats.path2 || {};
+        const current = left.current_path || right.current_path || '';
+        return [
+            `初始 ${formatCount(left.files || 0)} 文件 / ${formatSize(left.bytes || 0)}`,
+            `备份 ${formatCount(right.files || 0)} 文件 / ${formatSize(right.bytes || 0)}`,
+            current ? `当前 ${current}` : '',
+        ].filter(Boolean).join(' · ');
+    }
+
+    const current = stats.current_path || task.params?.path || '';
+    return [
+        `${formatCount(stats.files || 0)} 文件`,
+        `${formatCount(stats.dirs || 0)} 目录`,
+        formatSize(stats.bytes || 0),
+        current ? `当前 ${current}` : '',
+    ].filter(Boolean).join(' · ');
 }
 
 function renderDiff() {
@@ -326,8 +537,12 @@ async function analyzeSpace() {
         return;
     }
 
-    const button = document.getElementById('scanSpaceBtn');
-    button.disabled = true;
+    setTaskUi('space', {
+        status: 'queued',
+        progress: 0,
+        message: '正在创建空间分析任务...',
+        stats: {},
+    });
     document.getElementById('spaceSummary').innerHTML = renderSummaryCard({
         label: '扫描中',
         value: '...',
@@ -339,18 +554,18 @@ async function analyzeSpace() {
     document.getElementById('spaceTree').innerHTML = emptyText('正在扫描...');
 
     try {
-        const response = await fetch(`/api/scan?path=${encodeURIComponent(path)}`);
+        const response = await fetch(`/api/task/start-scan?path=${encodeURIComponent(path)}`);
         const data = await response.json();
         if (!response.ok || data.error) {
-            throw new Error(data.error || '扫描失败');
+            throw new Error(data.error || '创建扫描任务失败');
         }
-        spaceData = data.tree;
-        renderSpace();
+        spaceTaskId = data.task.id;
+        localStorage.setItem(SPACE_TASK_KEY, spaceTaskId);
+        subscribeTask('space', spaceTaskId);
     } catch (error) {
-        alert(error.message || '扫描失败');
+        alert(error.message || '创建扫描任务失败');
+        clearTaskState('space');
         document.getElementById('spaceMeta').textContent = '扫描失败';
-    } finally {
-        button.disabled = false;
     }
 }
 

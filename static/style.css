@@ -120,6 +120,21 @@ h1 {
     border-color: #b6c3d1;
 }
 
+.danger-button {
+    color: var(--red);
+}
+
+.danger-button:hover {
+    color: #8f1b13;
+    border-color: #f2aaa4;
+    background: var(--red-soft);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 main {
     max-width: 1680px;
     margin: 0 auto;
@@ -195,6 +210,14 @@ main {
     border-radius: 8px;
 }
 
+.progress-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
 .progress-bar {
     width: 100%;
     height: 10px;
@@ -211,9 +234,17 @@ main {
 }
 
 .progress-text {
-    margin-top: 8px;
     color: var(--muted);
     font-size: 13px;
+}
+
+.progress-detail {
+    margin-top: 8px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .summary-grid {

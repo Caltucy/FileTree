@@ -38,10 +38,14 @@
                 </div>
 
                 <div id="progress" class="progress-section hidden">
+                    <div class="progress-topline">
+                        <div id="progress-text" class="progress-text">正在扫描...</div>
+                        <button id="cancelDiffBtn" class="ghost-button danger-button" type="button">停止</button>
+                    </div>
                     <div class="progress-bar">
                         <div id="progress-fill" class="progress-fill"></div>
                     </div>
-                    <div id="progress-text" class="progress-text">正在扫描...</div>
+                    <div id="progress-detail" class="progress-detail">等待任务开始</div>
                 </div>
 
                 <div id="diffSummary" class="summary-grid"></div>
@@ -95,6 +99,17 @@
                         <input type="text" id="spacePath" autocomplete="off" placeholder="D:\">
                     </label>
                     <button id="scanSpaceBtn" class="primary-button" type="button">分析空间</button>
+                </div>
+
+                <div id="spaceProgress" class="progress-section hidden">
+                    <div class="progress-topline">
+                        <div id="spaceProgressText" class="progress-text">正在扫描...</div>
+                        <button id="cancelSpaceBtn" class="ghost-button danger-button" type="button">停止</button>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="spaceProgressFill" class="progress-fill"></div>
+                    </div>
+                    <div id="spaceProgressDetail" class="progress-detail">等待任务开始</div>
                 </div>
 
                 <div id="spaceSummary" class="summary-grid"></div>
