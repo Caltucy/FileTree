@@ -7,13 +7,21 @@ let diffTaskId = null;
 let spaceTaskId = null;
 let diffEventSource = null;
 let spaceEventSource = null;
+let ignoreRules = [];
+let recoveredTaskKind = null;
 
 const SPACE_TREE_LIMIT = 1800;
+const SPACE_CHILD_LIMIT = 18;
+const SPACE_TREE_CHILD_LIMIT = 24;
 const DIFF_TASK_KEY = 'filetree.diffTaskId';
 const SPACE_TASK_KEY = 'filetree.spaceTaskId';
+const IGNORE_CONFIG_KEY = 'filetree.ignoreConfig';
 
 document.addEventListener('DOMContentLoaded', () => {
     hydratePathsFromQuery();
+    initHelpPopovers();
+    loadIgnoreConfig();
+    renderIgnoreRules();
 
     document.querySelectorAll('.tab-button').forEach((button) => {
         button.addEventListener('click', () => switchView(button.dataset.view));
@@ -23,6 +31,28 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('scanSpaceBtn').addEventListener('click', analyzeSpace);
     document.getElementById('cancelDiffBtn').addEventListener('click', () => cancelTask('diff'));
     document.getElementById('cancelSpaceBtn').addEventListener('click', () => cancelTask('space'));
+    document.getElementById('useDefaultIgnore').addEventListener('change', saveIgnoreConfig);
+    document.getElementById('ignoreRuleMode').addEventListener('change', saveIgnoreConfig);
+    document.getElementById('addIgnoreRuleBtn').addEventListener('click', () => {
+        ignoreRules.push({
+            id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+            enabled: true,
+            field: 'path',
+            operator: 'contains',
+            value: '',
+            negate: false,
+        });
+        renderIgnoreRules();
+        saveIgnoreConfig();
+    });
+    document.getElementById('focusRecoveredTaskBtn').addEventListener('click', focusRecoveredTask);
+    document.getElementById('cancelRecoveredTaskBtn').addEventListener('click', () => {
+        if (recoveredTaskKind) {
+            cancelTask(recoveredTaskKind);
+        }
+        hideRecoveryBanner();
+    });
+    document.getElementById('dismissRecoveredTaskBtn').addEventListener('click', hideRecoveryBanner);
 
     document.getElementById('search').addEventListener('input', (event) => {
         clearTimeout(searchTimer);
@@ -50,6 +80,85 @@ document.addEventListener('DOMContentLoaded', () => {
     restoreTasks();
 });
 
+function initHelpPopovers() {
+    const popovers = document.querySelectorAll('[data-help-popover]');
+    if (!popovers.length) {
+        return;
+    }
+
+    const closePopover = (popover) => {
+        const trigger = popover.querySelector('.help-trigger');
+        const card = popover.querySelector('.mode-tooltip-card');
+        if (!trigger || !card) {
+            return;
+        }
+        popover.classList.remove('is-open', 'is-pinned');
+        trigger.setAttribute('aria-expanded', 'false');
+        card.hidden = true;
+    };
+
+    const openPopover = (popover) => {
+        const trigger = popover.querySelector('.help-trigger');
+        const card = popover.querySelector('.mode-tooltip-card');
+        if (!trigger || !card) {
+            return;
+        }
+        popovers.forEach((item) => {
+            if (item !== popover) {
+                closePopover(item);
+            }
+        });
+        card.hidden = false;
+        popover.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+    };
+
+    popovers.forEach((popover) => {
+        const trigger = popover.querySelector('.help-trigger');
+        if (!trigger) {
+            return;
+        }
+
+        trigger.addEventListener('mouseenter', () => openPopover(popover));
+        popover.addEventListener('mouseleave', () => {
+            if (!popover.classList.contains('is-pinned')) {
+                closePopover(popover);
+            }
+        });
+        trigger.addEventListener('focus', () => openPopover(popover));
+        trigger.addEventListener('blur', () => {
+            window.setTimeout(() => {
+                if (!popover.contains(document.activeElement) && !popover.classList.contains('is-pinned')) {
+                    closePopover(popover);
+                }
+            }, 0);
+        });
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (popover.classList.contains('is-pinned')) {
+                closePopover(popover);
+            } else {
+                openPopover(popover);
+                popover.classList.add('is-pinned');
+            }
+        });
+    });
+
+    document.addEventListener('click', (event) => {
+        popovers.forEach((popover) => {
+            if (!popover.contains(event.target)) {
+                closePopover(popover);
+            }
+        });
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            popovers.forEach(closePopover);
+        }
+    });
+}
+
 function hydratePathsFromQuery() {
     const params = new URLSearchParams(window.location.search);
     const path1 = params.get('path1');
@@ -60,6 +169,120 @@ function hydratePathsFromQuery() {
     if (path2) {
         document.getElementById('path2').value = path2;
     }
+}
+
+function loadIgnoreConfig() {
+    try {
+        const config = JSON.parse(localStorage.getItem(IGNORE_CONFIG_KEY) || '{}');
+        document.getElementById('useDefaultIgnore').checked = config.use_defaults !== false;
+        document.getElementById('ignoreRuleMode').value = config.rule_mode === 'all' ? 'all' : 'any';
+        ignoreRules = Array.isArray(config.rules) ? config.rules : [];
+    } catch {
+        ignoreRules = [];
+    }
+}
+
+function saveIgnoreConfig() {
+    const config = getIgnoreOptions();
+    localStorage.setItem(IGNORE_CONFIG_KEY, JSON.stringify(config));
+}
+
+function getIgnoreOptions() {
+    return {
+        use_defaults: document.getElementById('useDefaultIgnore').checked,
+        rule_mode: document.getElementById('ignoreRuleMode').value,
+        rules: ignoreRules
+            .map((rule) => ({
+                enabled: rule.enabled !== false,
+                field: rule.field || 'path',
+                operator: rule.operator || 'contains',
+                value: rule.value || '',
+                negate: Boolean(rule.negate),
+            }))
+            .filter((rule) => rule.value.trim()),
+    };
+}
+
+function getIgnoreQuery() {
+    return encodeURIComponent(JSON.stringify(getIgnoreOptions()));
+}
+
+function renderIgnoreRules() {
+    const container = document.getElementById('ignoreRules');
+    if (!ignoreRules.length) {
+        container.classList.add('empty-state');
+        container.innerHTML = '暂无自定义规则';
+        return;
+    }
+
+    container.classList.remove('empty-state');
+    container.innerHTML = ignoreRules.map((rule, index) => `
+        <div class="ignore-rule-row" data-index="${index}">
+            <label>
+                <input type="checkbox" data-role="enabled" ${rule.enabled === false ? '' : 'checked'}>
+            </label>
+            <select data-role="field">
+                <option value="path" ${rule.field === 'path' ? 'selected' : ''}>路径</option>
+                <option value="name" ${rule.field === 'name' ? 'selected' : ''}>名称</option>
+                <option value="extension" ${rule.field === 'extension' ? 'selected' : ''}>后缀</option>
+                <option value="type" ${rule.field === 'type' ? 'selected' : ''}>类型</option>
+                <option value="size" ${rule.field === 'size' ? 'selected' : ''}>大小</option>
+            </select>
+            <select data-role="operator">
+                ${renderOperatorOptions(rule.operator)}
+            </select>
+            <input type="text" data-role="value" value="${escapeHtml(rule.value || '')}" placeholder="例如 node_modules / .log / 100 MB">
+            <label class="toggle-field compact-toggle">
+                <input type="checkbox" data-role="negate" ${rule.negate ? 'checked' : ''}>
+                <span>非</span>
+            </label>
+            <button class="ghost-button danger-button" type="button" data-role="remove">删除</button>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.ignore-rule-row').forEach((row) => {
+        row.addEventListener('change', updateIgnoreRuleFromRow);
+        row.addEventListener('input', updateIgnoreRuleFromRow);
+        row.querySelector('[data-role="remove"]').addEventListener('click', () => {
+            const index = Number(row.dataset.index);
+            ignoreRules.splice(index, 1);
+            renderIgnoreRules();
+            saveIgnoreConfig();
+        });
+    });
+}
+
+function renderOperatorOptions(selected) {
+    const operators = [
+        ['contains', '包含'],
+        ['not_contains', '不包含'],
+        ['equals', '等于'],
+        ['starts_with', '开头是'],
+        ['ends_with', '结尾是'],
+        ['glob', '通配符'],
+        ['regex', '正则'],
+        ['greater_than', '大于'],
+        ['less_than', '小于'],
+    ];
+    return operators.map(([value, label]) => (
+        `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`
+    )).join('');
+}
+
+function updateIgnoreRuleFromRow(event) {
+    const row = event.currentTarget;
+    const index = Number(row.dataset.index);
+    const rule = ignoreRules[index];
+    if (!rule) {
+        return;
+    }
+
+    rule.enabled = row.querySelector('[data-role="enabled"]').checked;
+    rule.field = row.querySelector('[data-role="field"]').value;
+    rule.operator = row.querySelector('[data-role="operator"]').value;
+    rule.value = row.querySelector('[data-role="value"]').value;
+    rule.negate = row.querySelector('[data-role="negate"]').checked;
+    saveIgnoreConfig();
 }
 
 function switchView(viewName) {
@@ -90,7 +313,7 @@ async function compare() {
     setReviewLoading('正在审查...');
 
     try {
-        const url = `/api/task/start-compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}&fastMode=${fastMode}`;
+        const url = `/api/task/start-compare?path1=${encodeURIComponent(path1)}&path2=${encodeURIComponent(path2)}&fastMode=${fastMode}&ignoreOptions=${getIgnoreQuery()}`;
         const response = await fetch(url);
         const data = await response.json();
         if (!response.ok || data.error) {
@@ -132,6 +355,7 @@ async function restoreTask(kind, taskId) {
 
         handleTaskUpdate(kind, data.task);
         if (!isTerminalTask(data.task)) {
+            showRecoveryBanner(kind, data.task);
             subscribeTask(kind, taskId);
         }
     } catch {
@@ -198,6 +422,10 @@ function handleTaskUpdate(kind, task) {
             document.getElementById('spaceMeta').textContent = task.error || '扫描失败';
             clearTaskState('space', { keepProgress: true });
         }
+    }
+
+    if (isTerminalTask(task) && recoveredTaskKind === kind) {
+        hideRecoveryBanner();
     }
 }
 
@@ -311,6 +539,27 @@ function getTaskStatusLabel(status) {
     return labels[status] || status || '';
 }
 
+function showRecoveryBanner(kind, task) {
+    recoveredTaskKind = kind;
+    const label = kind === 'diff' ? '备份差异审查' : '空间占用分析';
+    document.getElementById('taskRecoveryText').textContent =
+        `检测到上次未完成的${label}：${task.message || getTaskStatusLabel(task.status)}`;
+    document.getElementById('taskRecoveryBanner').classList.remove('hidden');
+}
+
+function hideRecoveryBanner() {
+    recoveredTaskKind = null;
+    document.getElementById('taskRecoveryBanner').classList.add('hidden');
+}
+
+function focusRecoveredTask() {
+    if (!recoveredTaskKind) {
+        return;
+    }
+    switchView(recoveredTaskKind === 'diff' ? 'diff' : 'space');
+    hideRecoveryBanner();
+}
+
 function formatTaskDetail(task) {
     const stats = task.stats || {};
     if (task.type === 'compare') {
@@ -320,6 +569,7 @@ function formatTaskDetail(task) {
         return [
             `初始 ${formatCount(left.files || 0)} 文件 / ${formatSize(left.bytes || 0)}`,
             `备份 ${formatCount(right.files || 0)} 文件 / ${formatSize(right.bytes || 0)}`,
+            `忽略 ${formatCount((left.ignored || 0) + (right.ignored || 0))} 项`,
             current ? `当前 ${current}` : '',
         ].filter(Boolean).join(' · ');
     }
@@ -329,6 +579,7 @@ function formatTaskDetail(task) {
         `${formatCount(stats.files || 0)} 文件`,
         `${formatCount(stats.dirs || 0)} 目录`,
         formatSize(stats.bytes || 0),
+        `忽略 ${formatCount(stats.ignored || 0)} 项`,
         current ? `当前 ${current}` : '',
     ].filter(Boolean).join(' · ');
 }
@@ -435,12 +686,12 @@ function buildDiffTreeHTML(node, side, rootSize, isRoot = false) {
     return `<div class="tree-node ${statusClass}">${rowHtml}</div>`;
 }
 
-function renderTreeRow({ name, path, isDir, size, rootSize, status, statusLabel, reason }) {
+function renderTreeRow({ name, path, isDir, size, rootSize, status, statusLabel, reason, kindLabel }) {
     const sizePercent = rootSize > 0 ? Math.max(1, Math.min(100, (size / rootSize) * 100)) : 0;
     const title = [path, reason].filter(Boolean).join(' · ');
     return `
         <div class="tree-row" title="${escapeHtml(title)}">
-            <span class="node-name"><span class="node-kind">${isDir ? '目录' : '文件'}</span> ${escapeHtml(name)}</span>
+            <span class="node-name"><span class="node-kind">${escapeHtml(kindLabel || (isDir ? '目录' : '文件'))}</span> ${escapeHtml(name)}</span>
             <span class="node-size">${formatSize(size)}</span>
             <span class="status-pill">${escapeHtml(statusLabel || getStatusLabel(status))}</span>
             <span class="size-track"><span class="size-fill" style="width:${sizePercent}%"></span></span>
@@ -554,7 +805,7 @@ async function analyzeSpace() {
     document.getElementById('spaceTree').innerHTML = emptyText('正在扫描...');
 
     try {
-        const response = await fetch(`/api/task/start-scan?path=${encodeURIComponent(path)}`);
+        const response = await fetch(`/api/task/start-scan?path=${encodeURIComponent(path)}&ignoreOptions=${getIgnoreQuery()}`);
         const data = await response.json();
         if (!response.ok || data.error) {
             throw new Error(data.error || '创建扫描任务失败');
@@ -622,10 +873,7 @@ function renderSpace() {
 
 function renderTreemap() {
     const treemap = document.getElementById('treemap');
-    const children = (spaceData.children || [])
-        .slice()
-        .sort((a, b) => (b.size || 0) - (a.size || 0))
-        .slice(0, 18);
+    const children = aggregateSpaceChildren(spaceData.children || [], SPACE_CHILD_LIMIT);
 
     if (!children.length) {
         treemap.innerHTML = emptyText('没有可展示的子项');
@@ -634,16 +882,21 @@ function renderTreemap() {
 
     const rootSize = Math.max(spaceData.size || 0, 1);
     treemap.classList.remove('empty-state');
-    treemap.innerHTML = children.map((node) => {
+    treemap.innerHTML = children.map((node, index) => {
         const share = (node.size || 0) / rootSize;
         const basis = Math.max(16, Math.min(72, share * 100));
         const grow = Math.max(1, Math.round(share * 100));
+        const tileClass = node.is_other ? 'is-other' : `palette-${index % 6}`;
         return `
-            <div class="treemap-tile" style="flex-basis:${basis}%; flex-grow:${grow}" title="${escapeHtml(node.path)}">
-                <div class="tile-name">${escapeHtml(node.name)}</div>
-                <div>
+            <div class="treemap-tile ${tileClass}" style="flex-basis:${basis}%; flex-grow:${grow}" title="${escapeHtml(node.path || node.name)}">
+                <div class="tile-top">
+                    <div class="tile-name">${escapeHtml(node.name)}</div>
+                    <div class="tile-rank">#${index + 1}</div>
+                </div>
+                <div class="tile-bottom">
                     <div class="tile-size">${formatSize(node.size || 0)}</div>
-                    <div class="tile-share">${formatPercent(share)}</div>
+                    <div class="tile-share">${formatPercent(share)} · ${formatCount(node.file_count || 0)} 文件</div>
+                    <div class="tile-meter"><span style="width:${Math.max(2, Math.min(100, share * 100))}%"></span></div>
                 </div>
             </div>
         `;
@@ -678,9 +931,7 @@ function renderSpaceTree() {
             return '';
         }
         rendered += 1;
-        const children = (node.children || [])
-            .slice()
-            .sort((a, b) => (b.size || 0) - (a.size || 0));
+        const children = aggregateSpaceChildren(node.children || [], SPACE_TREE_CHILD_LIMIT);
         const rowHtml = renderTreeRow({
             name: node.name,
             path: node.path,
@@ -690,7 +941,12 @@ function renderSpaceTree() {
             status: 'same',
             statusLabel: formatPercent((node.size || 0) / rootSize),
             reason: node.path,
+            kindLabel: node.is_other ? '聚合' : undefined,
         });
+
+        if (node.is_other) {
+            return `<div class="tree-node status-same">${rowHtml}</div>`;
+        }
 
         if (node.is_dir) {
             return `
@@ -713,6 +969,35 @@ function collectSpaceNodes(node, items = []) {
     items.push(node);
     (node.children || []).forEach((child) => collectSpaceNodes(child, items));
     return items;
+}
+
+function aggregateSpaceChildren(children, limit) {
+    const sorted = sortSpaceChildren(children);
+    if (sorted.length <= limit) {
+        return sorted;
+    }
+
+    const visible = sorted.slice(0, Math.max(1, limit - 1));
+    const hidden = sorted.slice(visible.length);
+    return [...visible, makeOtherNode(hidden)];
+}
+
+function sortSpaceChildren(children) {
+    const dirs = children.filter((node) => node.is_dir).sort((a, b) => (b.size || 0) - (a.size || 0));
+    const files = children.filter((node) => !node.is_dir).sort((a, b) => (b.size || 0) - (a.size || 0));
+    return dirs.length ? [...dirs, ...files] : files;
+}
+
+function makeOtherNode(nodes) {
+    return {
+        name: `其他 ${formatCount(nodes.length)} 项`,
+        path: '',
+        is_dir: false,
+        is_other: true,
+        size: nodes.reduce((total, node) => total + (node.size || 0), 0),
+        file_count: nodes.reduce((total, node) => total + (node.file_count || (node.is_dir ? 0 : 1)), 0),
+        dir_count: nodes.reduce((total, node) => total + (node.dir_count || (node.is_dir ? 1 : 0)), 0),
+    };
 }
 
 function renderSummaryCard(card) {

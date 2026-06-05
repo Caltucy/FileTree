@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FileTree 备份审查</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260605-default-ignore">
 </head>
 <body>
     <div class="app-shell">
@@ -20,6 +20,56 @@
         </header>
 
         <main>
+            <div id="taskRecoveryBanner" class="recovery-banner hidden">
+                <span id="taskRecoveryText">检测到上次未完成的任务</span>
+                <div class="recovery-actions">
+                    <button id="focusRecoveredTaskBtn" class="ghost-button" type="button">继续查看</button>
+                    <button id="cancelRecoveredTaskBtn" class="ghost-button danger-button" type="button">停止任务</button>
+                    <button id="dismissRecoveredTaskBtn" class="ghost-button" type="button">忽略</button>
+                </div>
+            </div>
+
+            <section class="ignore-panel">
+                <div class="ignore-header">
+                    <div>
+                        <div class="panel-title">忽略规则</div>
+                        <div class="tree-meta">扫描和比较时跳过匹配项</div>
+                    </div>
+                    <div class="ignore-toggle-group">
+                        <label class="toggle-field compact-toggle">
+                            <input type="checkbox" id="useDefaultIgnore" checked>
+                            <span>默认忽略</span>
+                        </label>
+                        <span class="help-popover ignore-help-popover" data-help-popover>
+                            <button class="help-trigger" type="button" aria-label="默认忽略说明" aria-controls="defaultIgnoreTooltip" aria-expanded="false">?</button>
+                            <span id="defaultIgnoreTooltip" class="mode-tooltip-card ignore-tooltip-card" role="tooltip" hidden>
+                                <span class="tooltip-title">默认忽略</span>
+                                <span class="tooltip-mode">
+                                    <span class="tooltip-badge default">默认</span>
+                                    <span>扫描和比较时自动跳过常见缓存、依赖、构建产物和系统临时文件。</span>
+                                </span>
+                                <span class="tooltip-list">
+                                    <span><strong>目录</strong> .git、node_modules、__pycache__、.venv、dist、build、target 等</span>
+                                    <span><strong>文件</strong> *.log、*.tmp、*.pyc、.DS_Store、Thumbs.db、desktop.ini 等</span>
+                                </span>
+                                <span class="tooltip-note">关闭后会把这些项目也纳入扫描，结果更完整，但速度可能变慢，差异列表也会更吵。</span>
+                            </span>
+                        </span>
+                    </div>
+                </div>
+                <div class="ignore-controls">
+                    <label class="compact-field">
+                        <span>自定义规则关系</span>
+                        <select id="ignoreRuleMode">
+                            <option value="any">任一命中（或）</option>
+                            <option value="all">全部命中（与）</option>
+                        </select>
+                    </label>
+                    <button id="addIgnoreRuleBtn" class="ghost-button" type="button">添加规则</button>
+                </div>
+                <div id="ignoreRules" class="ignore-rules empty-state">暂无自定义规则</div>
+            </section>
+
             <section id="diffView" class="view active" aria-labelledby="diffTab">
                 <div class="control-band">
                     <label class="path-field">
@@ -30,10 +80,27 @@
                         <span>备份文件夹</span>
                         <input type="text" id="path2" autocomplete="off" placeholder="E:\backup">
                     </label>
-                    <label class="toggle-field">
-                        <input type="checkbox" id="fastMode" checked>
-                        <span>快速比较</span>
-                    </label>
+                    <div class="toggle-field compare-mode-field">
+                        <label class="toggle-inline">
+                            <input type="checkbox" id="fastMode" checked>
+                            <span>快速比较</span>
+                        </label>
+                        <span class="help-popover" data-help-popover>
+                            <button class="help-trigger" type="button" aria-label="比较模式说明" aria-controls="compareModeTooltip" aria-expanded="false">?</button>
+                            <span id="compareModeTooltip" class="mode-tooltip-card" role="tooltip" hidden>
+                                <span class="tooltip-title">比较模式</span>
+                                <span class="tooltip-mode">
+                                    <span class="tooltip-badge fast">快速</span>
+                                    <span>比较文件大小和修改时间，速度最快，适合日常备份审查。</span>
+                                </span>
+                                <span class="tooltip-mode">
+                                    <span class="tooltip-badge exact">精确</span>
+                                    <span>大小相同但时间不同时计算哈希，更准确，但大文件会更慢。</span>
+                                </span>
+                                <span class="tooltip-note">极少数“大小和时间都相同但内容不同”的文件，只有精确检查才能发现。</span>
+                            </span>
+                        </span>
+                    </div>
                     <button id="compareBtn" class="primary-button" type="button">开始审查</button>
                 </div>
 
@@ -148,6 +215,6 @@
         </main>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260605-default-ignore"></script>
 </body>
 </html>

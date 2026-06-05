@@ -110,15 +110,27 @@ def progress_from_counts(files, dirs):
     return min(72, 6 + int((files + dirs) ** 0.5 * 2.8))
 
 
+def parse_ignore_options(params):
+    raw = params.get('ignoreOptions', [''])[0]
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def run_space_scan_task(task):
     path = task.params['path']
+    ignore_options = task.params.get('ignoreOptions')
     try:
         task.update(
             status='running',
             phase='scanning',
             progress=4,
             message='开始扫描...',
-            stats={'files': 0, 'dirs': 0, 'bytes': 0, 'current_path': path},
+            stats={'files': 0, 'dirs': 0, 'bytes': 0, 'ignored': 0, 'current_path': path},
         )
 
         def on_progress(info):
@@ -132,7 +144,7 @@ def run_space_scan_task(task):
                 stats=info,
             )
 
-        tree = scan_directory(path, on_progress, cancel_event=task.cancel_event)
+        tree = scan_directory(path, on_progress, cancel_event=task.cancel_event, ignore_options=ignore_options)
         if task.cancel_event.is_set():
             raise ScanCancelled()
         if not tree:
@@ -149,6 +161,10 @@ def run_space_scan_task(task):
                 'files': tree.get('file_count', 0),
                 'dirs': tree.get('dir_count', 0),
                 'bytes': tree.get('size', 0),
+                'ignored': tree.get('ignored_count', 0),
+                'ignored_files': tree.get('ignored_files', 0),
+                'ignored_dirs': tree.get('ignored_dirs', 0),
+                'ignored_bytes': tree.get('ignored_bytes', 0),
                 'current_path': path,
             },
         )
@@ -162,9 +178,10 @@ def run_compare_task(task):
     path1 = task.params['path1']
     path2 = task.params['path2']
     fast_mode = task.params.get('fastMode', True)
+    ignore_options = task.params.get('ignoreOptions')
     scan_state = {
-        'path1': {'files': 0, 'dirs': 0, 'bytes': 0, 'current_path': path1},
-        'path2': {'files': 0, 'dirs': 0, 'bytes': 0, 'current_path': path2},
+        'path1': {'files': 0, 'dirs': 0, 'bytes': 0, 'ignored': 0, 'current_path': path1},
+        'path2': {'files': 0, 'dirs': 0, 'bytes': 0, 'ignored': 0, 'current_path': path2},
     }
     state_lock = Lock()
 
@@ -199,8 +216,22 @@ def run_compare_task(task):
         )
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future1 = executor.submit(scan_directory, path1, make_progress('path1'), fast_mode, task.cancel_event)
-            future2 = executor.submit(scan_directory, path2, make_progress('path2'), fast_mode, task.cancel_event)
+            future1 = executor.submit(
+                scan_directory,
+                path1,
+                make_progress('path1'),
+                fast_mode,
+                task.cancel_event,
+                ignore_options,
+            )
+            future2 = executor.submit(
+                scan_directory,
+                path2,
+                make_progress('path2'),
+                fast_mode,
+                task.cancel_event,
+                ignore_options,
+            )
             tree1 = future1.result()
             tree2 = future2.result()
 
@@ -254,6 +285,12 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         if sys.stderr:
             super().log_message(format, *args)
 
+    def end_headers(self):
+        if not self.path.startswith('/api/'):
+            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+        super().end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
 
@@ -280,12 +317,13 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
     def handle_scan(self, parsed):
         params = parse_qs(parsed.query)
         path = params.get('path', [''])[0]
+        ignore_options = parse_ignore_options(params)
 
         if not path:
             self.send_json({'error': 'Path required'}, 400)
             return
 
-        tree = scan_directory(path)
+        tree = scan_directory(path, ignore_options=ignore_options)
         if tree:
             self.send_json({'tree': tree})
         else:
@@ -300,11 +338,12 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
     def handle_start_scan(self, parsed):
         params = parse_qs(parsed.query)
         path = params.get('path', [''])[0]
+        ignore_options = parse_ignore_options(params)
         if not path:
             self.send_json({'error': 'Path required'}, 400)
             return
 
-        task = TASK_MANAGER.create('space_scan', {'path': path})
+        task = TASK_MANAGER.create('space_scan', {'path': path, 'ignoreOptions': ignore_options})
         self.send_json({'task': task.snapshot(include_result=False)})
 
     def handle_start_compare(self, parsed):
@@ -317,6 +356,7 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         path1 = params.get('path1', [''])[0]
         path2 = params.get('path2', [''])[0]
         fast_mode = params.get('fastMode', ['true'])[0].lower() == 'true'
+        ignore_options = parse_ignore_options(params)
 
         if not path1 or not path2:
             self.send_json({'error': 'Both paths required'}, 400)
@@ -326,6 +366,7 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
             'path1': path1,
             'path2': path2,
             'fastMode': fast_mode,
+            'ignoreOptions': ignore_options,
         })
 
     def handle_task_status(self, parsed):
