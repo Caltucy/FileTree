@@ -1,7 +1,9 @@
 import json
 import os
+import subprocess
 import sys
 import time
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from threading import Condition, Event, Lock
@@ -119,6 +121,28 @@ def parse_ignore_options(params):
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def open_in_file_manager(path_value):
+    target = Path(path_value).expanduser()
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+
+    resolved = target.resolve()
+    if sys.platform == 'win32':
+        if resolved.is_dir():
+            os.startfile(str(resolved))
+        else:
+            subprocess.Popen(['explorer.exe', f'/select,{resolved}'])
+    elif sys.platform == 'darwin':
+        if resolved.is_dir():
+            subprocess.Popen(['open', str(resolved)])
+        else:
+            subprocess.Popen(['open', '-R', str(resolved)])
+    else:
+        open_target = resolved if resolved.is_dir() else resolved.parent
+        subprocess.Popen(['xdg-open', str(open_target)])
+    return resolved
 
 
 def run_space_scan_task(task):
@@ -308,6 +332,8 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
             self.handle_task_events(parsed)
         elif parsed.path == '/api/task/cancel':
             self.handle_task_cancel(parsed)
+        elif parsed.path == '/api/open-path':
+            self.handle_open_path(parsed)
         elif parsed.path == '/':
             self.path = '/static/index.html'
             return SimpleHTTPRequestHandler.do_GET(self)
@@ -384,6 +410,22 @@ class FileTreeHandler(SimpleHTTPRequestHandler):
         task = self.get_task_from_query(parsed)
         if task:
             self.stream_task(task)
+
+    def handle_open_path(self, parsed):
+        params = parse_qs(parsed.query)
+        path = params.get('path', [''])[0]
+        if not path:
+            self.send_json({'error': 'Path required'}, 400)
+            return
+
+        try:
+            opened_path = open_in_file_manager(path)
+        except FileNotFoundError:
+            self.send_json({'error': 'Path not found'}, 404)
+        except Exception as exc:
+            self.send_json({'error': f'Failed to open path: {exc}'}, 500)
+        else:
+            self.send_json({'ok': True, 'path': str(opened_path)})
 
     def get_task_from_query(self, parsed):
         params = parse_qs(parsed.query)

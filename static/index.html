@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FileTree 备份审查</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260605-default-ignore">
+    <link rel="stylesheet" href="/static/style.css?v=20260605-diff-tree-mode">
 </head>
 <body>
     <div class="app-shell">
@@ -124,7 +124,7 @@
                             <button class="filter-button active" type="button" data-filter="diff">全部差异</button>
                             <button class="filter-button" type="button" data-filter="update">需要更新</button>
                             <button class="filter-button" type="button" data-filter="copy">缺失备份</button>
-                            <button class="filter-button" type="button" data-filter="extra">备份多余</button>
+                            <button class="filter-button" type="button" data-filter="extra">仅备份侧</button>
                             <button class="filter-button" type="button" data-filter="conflict">冲突</button>
                         </div>
                         <label class="search-field">
@@ -141,6 +141,7 @@
                                 <div class="tree-meta" id="diffMeta">尚未比较</div>
                             </div>
                             <div class="tree-actions">
+                                <button id="toggleTreeScopeBtn" class="ghost-button" type="button">显示全部</button>
                                 <button id="expandDiffBtn" class="ghost-button" type="button">展开</button>
                                 <button id="collapseDiffBtn" class="ghost-button" type="button">折叠</button>
                             </div>
@@ -215,6 +216,6 @@
         </main>
     </div>
 
-    <script src="/static/app.js?v=20260605-default-ignore"></script>
+    <script src="/static/app.js?v=20260605-diff-tree-mode"></script>
 </body>
 </html>

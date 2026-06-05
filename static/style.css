@@ -94,7 +94,8 @@ h1 {
 .tab-button,
 .filter-button,
 .ghost-button,
-.primary-button {
+.primary-button,
+.open-path-button {
     min-height: 36px;
     border: 1px solid transparent;
     border-radius: 6px;
@@ -129,6 +130,7 @@ h1 {
 .ghost-button:focus,
 .filter-button:focus,
 .tab-button:focus,
+.open-path-button:focus,
 .help-trigger:focus,
 input:focus,
 select:focus {
@@ -146,6 +148,39 @@ select:focus {
     color: var(--text);
     border-color: var(--border-strong);
     background: #fdfefe;
+}
+
+.ghost-button.active-soft {
+    color: var(--blue);
+    border-color: #b8caf5;
+    background: var(--blue-soft);
+}
+
+.open-path-button {
+    min-width: 28px;
+    min-height: 28px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-color: var(--border);
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.74);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.open-path-button:hover {
+    color: var(--blue);
+    border-color: #b8caf5;
+    background: #ffffff;
+}
+
+.open-path-button:disabled {
+    opacity: 0.5;
 }
 
 .danger-button {
@@ -739,6 +774,13 @@ main {
     white-space: nowrap;
 }
 
+.action-item-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
 .action-item span {
     display: block;
     margin-top: 4px;
@@ -814,6 +856,7 @@ main {
 }
 
 .tree-node summary {
+    cursor: pointer;
     list-style: none;
 }
 
@@ -824,7 +867,7 @@ main {
 .tree-row {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(210px, 1fr) minmax(74px, auto) minmax(68px, auto);
+    grid-template-columns: minmax(210px, 1fr) minmax(74px, auto) minmax(68px, auto) auto;
     gap: 8px;
     align-items: center;
     min-height: 34px;
@@ -846,6 +889,20 @@ main {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.tree-node details > summary .node-name::before {
+    content: "›";
+    display: inline-flex;
+    width: 13px;
+    margin-right: 4px;
+    color: #8a98aa;
+    font-weight: 700;
+    transition: transform 0.12s ease;
+}
+
+.tree-node details[open] > summary .node-name::before {
+    transform: rotate(90deg);
 }
 
 .node-kind {
@@ -946,6 +1003,17 @@ main {
     margin-left: 18px;
     border-left: 1px solid #e5eaf0;
     padding-left: 8px;
+}
+
+.tree-empty-note {
+    margin: 6px 0 7px;
+    padding: 8px 10px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+    color: var(--muted);
+    background: #f8fafc;
+    font-size: 12px;
+    line-height: 1.45;
 }
 
 .size-track {
@@ -1057,6 +1125,12 @@ main {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: start;
+}
+
+.tile-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .treemap-tile .tile-name {

@@ -1,6 +1,7 @@
 let comparisonData = null;
 let spaceData = null;
 let reviewFilter = 'diff';
+let treeShowAll = false;
 let searchQuery = '';
 let searchTimer = null;
 let diffTaskId = null;
@@ -31,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('scanSpaceBtn').addEventListener('click', analyzeSpace);
     document.getElementById('cancelDiffBtn').addEventListener('click', () => cancelTask('diff'));
     document.getElementById('cancelSpaceBtn').addEventListener('click', () => cancelTask('space'));
+    document.addEventListener('click', handleOpenPathClick, true);
     document.getElementById('useDefaultIgnore').addEventListener('change', saveIgnoreConfig);
     document.getElementById('ignoreRuleMode').addEventListener('change', saveIgnoreConfig);
     document.getElementById('addIgnoreRuleBtn').addEventListener('click', () => {
@@ -74,9 +76,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('expandDiffBtn').addEventListener('click', () => setDetailsOpen('#diffView', true));
     document.getElementById('collapseDiffBtn').addEventListener('click', () => setDetailsOpen('#diffView', false));
+    document.getElementById('toggleTreeScopeBtn').addEventListener('click', () => {
+        treeShowAll = !treeShowAll;
+        updateTreeScopeButton();
+        renderDiff();
+    });
     document.getElementById('expandSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', true));
     document.getElementById('collapseSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', false));
 
+    updateTreeScopeButton();
     restoreTasks();
 });
 
@@ -157,6 +165,34 @@ function initHelpPopovers() {
             popovers.forEach(closePopover);
         }
     });
+}
+
+async function handleOpenPathClick(event) {
+    const button = event.target.closest('[data-open-path]');
+    if (!button) {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const path = button.dataset.openPath;
+    if (!path) {
+        return;
+    }
+
+    button.disabled = true;
+    try {
+        const response = await fetch(`/api/open-path?path=${encodeURIComponent(path)}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.error) {
+            throw new Error(data.error || '打开路径失败');
+        }
+    } catch (error) {
+        alert(error.message || '打开路径失败');
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function hydratePathsFromQuery() {
@@ -560,6 +596,15 @@ function focusRecoveredTask() {
     hideRecoveryBanner();
 }
 
+function updateTreeScopeButton() {
+    const button = document.getElementById('toggleTreeScopeBtn');
+    if (!button) {
+        return;
+    }
+    button.textContent = treeShowAll ? '只看差异' : '显示全部';
+    button.classList.toggle('active-soft', treeShowAll);
+}
+
 function formatTaskDetail(task) {
     const stats = task.stats || {};
     if (task.type === 'compare') {
@@ -601,8 +646,9 @@ function renderDiff() {
     tree2.innerHTML = buildDiffTreeHTML(comparisonData, 'right', rootSize, true) || emptyText('无匹配项');
 
     const summary = comparisonData.summary || {};
+    const treeModeLabel = treeShowAll ? '显示全部' : '只看差异';
     document.getElementById('diffMeta').textContent =
-        `初始 ${formatSize(summary.source_size)} / ${formatCount(summary.source_files)} 文件 · ` +
+        `${treeModeLabel} · 初始 ${formatSize(summary.source_size)} / ${formatCount(summary.source_files)} 文件 · ` +
         `备份 ${formatSize(summary.backup_size)} / ${formatCount(summary.backup_files)} 文件 · ` +
         `差值 ${formatSignedSize(summary.size_delta)}`;
 }
@@ -623,9 +669,9 @@ function renderDiffSummary() {
             className: 'is-red',
         },
         {
-            label: '备份多余',
+            label: '仅备份侧',
             value: formatCount(summary.only_backup_files || 0),
-            hint: `待复核 ${formatSize(summary.bytes_to_review || 0)}`,
+            hint: `仅备份侧 ${formatSize(summary.bytes_to_review || 0)}`,
             className: 'is-blue',
         },
         {
@@ -648,7 +694,7 @@ function buildDiffTreeHTML(node, side, rootSize, isRoot = false) {
     if (!isRoot && !sideHasNode(node, side)) {
         return '';
     }
-    if (!isRoot && !subtreeMatchesReview(node)) {
+    if (!isRoot && !subtreeMatchesTreeView(node)) {
         return '';
     }
 
@@ -659,6 +705,7 @@ function buildDiffTreeHTML(node, side, rootSize, isRoot = false) {
         .map((child) => buildDiffTreeHTML(child, side, rootSize, false))
         .filter(Boolean)
         .join('');
+    const childContent = childHtml || renderDiffTreeEmptyNote(node, side);
     const rowHtml = renderTreeRow({
         name: node.name,
         path: node[`path${sideIndex}`],
@@ -675,9 +722,9 @@ function buildDiffTreeHTML(node, side, rootSize, isRoot = false) {
         const shouldOpen = isRoot || node.status !== 'same' || Boolean(searchQuery);
         return `
             <div class="tree-node ${statusClass}">
-                <details ${shouldOpen ? 'open' : ''}>
-                    <summary>${rowHtml}</summary>
-                    <div class="tree-children">${childHtml}</div>
+                    <details ${shouldOpen ? 'open' : ''}>
+                        <summary>${rowHtml}</summary>
+                    <div class="tree-children">${childContent}</div>
                 </details>
             </div>
         `;
@@ -686,16 +733,26 @@ function buildDiffTreeHTML(node, side, rootSize, isRoot = false) {
     return `<div class="tree-node ${statusClass}">${rowHtml}</div>`;
 }
 
-function renderTreeRow({ name, path, isDir, size, rootSize, status, statusLabel, reason, kindLabel }) {
+function renderTreeRow({ name, path, isDir, size, rootSize, status, statusLabel, reason, kindLabel, openPath }) {
     const sizePercent = rootSize > 0 ? Math.max(1, Math.min(100, (size / rootSize) * 100)) : 0;
     const title = [path, reason].filter(Boolean).join(' · ');
+    const openButton = openPath ? renderOpenPathButton(openPath) : '';
     return `
         <div class="tree-row" title="${escapeHtml(title)}">
             <span class="node-name"><span class="node-kind">${escapeHtml(kindLabel || (isDir ? '目录' : '文件'))}</span> ${escapeHtml(name)}</span>
             <span class="node-size">${formatSize(size)}</span>
             <span class="status-pill">${escapeHtml(statusLabel || getStatusLabel(status))}</span>
+            ${openButton}
             <span class="size-track"><span class="size-fill" style="width:${sizePercent}%"></span></span>
         </div>
+    `;
+}
+
+function renderOpenPathButton(path) {
+    return `
+        <button class="open-path-button" type="button" data-open-path="${escapeHtml(path)}" title="在文件管理器中打开" aria-label="在文件管理器中打开">
+            ↗
+        </button>
     `;
 }
 
@@ -703,11 +760,36 @@ function sideHasNode(node, side) {
     return side === 'left' ? Boolean(node.path1) : Boolean(node.path2);
 }
 
+function subtreeMatchesTreeView(node) {
+    if (!treeShowAll) {
+        return subtreeMatchesReview(node);
+    }
+    if (nodeMatchesSearch(node)) {
+        return true;
+    }
+    return (node.children || []).some(subtreeMatchesTreeView);
+}
+
 function subtreeMatchesReview(node) {
     if (nodeMatchesReview(node)) {
         return true;
     }
     return (node.children || []).some(subtreeMatchesReview);
+}
+
+function nodeMatchesSearch(node) {
+    if (!searchQuery) {
+        return true;
+    }
+
+    const haystack = [
+        node.name,
+        node.path1,
+        node.path2,
+        node.reason,
+        node.action,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(searchQuery);
 }
 
 function nodeMatchesReview(node) {
@@ -724,18 +806,34 @@ function nodeMatchesReview(node) {
     if (!filterMatch) {
         return false;
     }
-    if (!searchQuery) {
-        return true;
+    return nodeMatchesSearch(node);
+}
+
+function renderDiffTreeEmptyNote(node, side) {
+    const children = node.children || [];
+    if (!children.length) {
+        return `<div class="tree-empty-note">${side === 'left' ? '初始侧' : '备份侧'}没有子项</div>`;
     }
 
-    const haystack = [
-        node.name,
-        node.path1,
-        node.path2,
-        node.reason,
-        node.action,
-    ].filter(Boolean).join(' ').toLowerCase();
-    return haystack.includes(searchQuery);
+    const sideLabel = side === 'left' ? '初始侧' : '备份侧';
+    const otherLabel = side === 'left' ? '备份侧' : '初始侧';
+    const sideChildren = children.filter((child) => sideHasNode(child, side));
+    const otherVisibleChildren = children.filter((child) => !sideHasNode(child, side) && subtreeMatchesTreeView(child));
+    let message = `${sideLabel}当前没有可显示子项`;
+
+    if (!sideChildren.length && otherVisibleChildren.length) {
+        message = `当前可见差异只存在于${otherLabel}`;
+    } else if (searchQuery) {
+        message = `${sideLabel}没有命中当前搜索的子项`;
+    } else if (!treeShowAll && otherVisibleChildren.length) {
+        message = `${sideLabel}没有符合当前筛选的差异子项；差异在${otherLabel}。点“显示全部”可查看此目录实际内容`;
+    } else if (!treeShowAll && sideChildren.length) {
+        message = `${sideLabel}子项被当前筛选隐藏。点“显示全部”可查看`;
+    } else if (treeShowAll && !sideChildren.length) {
+        message = `此项只存在于${otherLabel}`;
+    }
+
+    return `<div class="tree-empty-note">${escapeHtml(message)}</div>`;
 }
 
 function renderActionList() {
@@ -887,11 +985,15 @@ function renderTreemap() {
         const basis = Math.max(16, Math.min(72, share * 100));
         const grow = Math.max(1, Math.round(share * 100));
         const tileClass = node.is_other ? 'is-other' : `palette-${index % 6}`;
+        const openButton = node.path ? renderOpenPathButton(node.path) : '';
         return `
             <div class="treemap-tile ${tileClass}" style="flex-basis:${basis}%; flex-grow:${grow}" title="${escapeHtml(node.path || node.name)}">
                 <div class="tile-top">
                     <div class="tile-name">${escapeHtml(node.name)}</div>
-                    <div class="tile-rank">#${index + 1}</div>
+                    <div class="tile-actions">
+                        ${openButton}
+                        <div class="tile-rank">#${index + 1}</div>
+                    </div>
                 </div>
                 <div class="tile-bottom">
                     <div class="tile-size">${formatSize(node.size || 0)}</div>
@@ -914,7 +1016,10 @@ function renderLargestFiles(files) {
     list.classList.remove('empty-state');
     list.innerHTML = topFiles.map((file) => `
         <div class="action-item">
-            <strong title="${escapeHtml(file.path)}">${escapeHtml(file.name)}</strong>
+            <div class="action-item-head">
+                <strong title="${escapeHtml(file.path)}">${escapeHtml(file.name)}</strong>
+                ${renderOpenPathButton(file.path)}
+            </div>
             <span>${formatSize(file.size || 0)}</span>
             <span>${escapeHtml(file.path)}</span>
         </div>
@@ -942,6 +1047,7 @@ function renderSpaceTree() {
             statusLabel: formatPercent((node.size || 0) / rootSize),
             reason: node.path,
             kindLabel: node.is_other ? '聚合' : undefined,
+            openPath: node.is_other ? '' : node.path,
         });
 
         if (node.is_other) {
@@ -1016,7 +1122,7 @@ function getStatusLabel(status, side = '') {
         modified: '需更新',
         metadata: '元数据',
         only_left: side === 'left' ? '待复制' : '缺失',
-        only_right: side === 'right' ? '待复核' : '多余',
+        only_right: side === 'right' ? '仅备份侧' : '多余',
         type_changed: '冲突',
     };
     return labels[status] || status || '';
