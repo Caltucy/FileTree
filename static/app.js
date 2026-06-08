@@ -10,6 +10,9 @@ let diffEventSource = null;
 let spaceEventSource = null;
 let ignoreRules = [];
 let recoveredTaskKind = null;
+let spaceTreeNodeMap = new Map();
+let spaceTreeRenderedCount = 0;
+let spaceTreeRootSize = 1;
 
 const SPACE_TREE_LIMIT = 1800;
 const SPACE_CHILD_LIMIT = 18;
@@ -81,7 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTreeScopeButton();
         renderDiff();
     });
-    document.getElementById('expandSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', true));
+    document.getElementById('spaceTree').addEventListener('toggle', handleSpaceTreeToggle, true);
+    document.getElementById('expandSpaceBtn').addEventListener('click', expandSpaceTree);
     document.getElementById('collapseSpaceBtn').addEventListener('click', () => setDetailsOpen('#spaceTree', false));
 
     updateTreeScopeButton();
@@ -1028,47 +1032,119 @@ function renderLargestFiles(files) {
 
 function renderSpaceTree() {
     const panel = document.getElementById('spaceTree');
-    let rendered = 0;
-    const rootSize = Math.max(spaceData.size || 0, 1);
+    spaceTreeNodeMap = new Map();
+    spaceTreeRenderedCount = 0;
+    spaceTreeRootSize = Math.max(spaceData.size || 0, 1);
+    panel.classList.remove('empty-state');
+    panel.innerHTML = buildSpaceTreeNode(spaceData, true);
+}
 
-    function build(node, isRoot = false) {
-        if (rendered >= SPACE_TREE_LIMIT) {
-            return '';
-        }
-        rendered += 1;
-        const children = aggregateSpaceChildren(node.children || [], SPACE_TREE_CHILD_LIMIT);
-        const rowHtml = renderTreeRow({
-            name: node.name,
-            path: node.path,
-            isDir: node.is_dir,
-            size: node.size || 0,
-            rootSize,
-            status: 'same',
-            statusLabel: formatPercent((node.size || 0) / rootSize),
-            reason: node.path,
-            kindLabel: node.is_other ? '聚合' : undefined,
-            openPath: node.is_other ? '' : node.path,
-        });
+function buildSpaceTreeNode(node, isRoot = false) {
+    if (spaceTreeRenderedCount >= SPACE_TREE_LIMIT) {
+        return renderSpaceTreeLimitNote();
+    }
 
-        if (node.is_other) {
-            return `<div class="tree-node status-same">${rowHtml}</div>`;
-        }
+    spaceTreeRenderedCount += 1;
+    const children = aggregateSpaceChildren(node.children || [], SPACE_TREE_CHILD_LIMIT);
+    const rowHtml = renderTreeRow({
+        name: node.name,
+        path: node.path,
+        isDir: node.is_dir,
+        size: node.size || 0,
+        rootSize: spaceTreeRootSize,
+        status: 'same',
+        statusLabel: formatPercent((node.size || 0) / spaceTreeRootSize),
+        reason: node.path,
+        kindLabel: node.is_other ? '聚合' : undefined,
+        openPath: node.is_other ? '' : node.path,
+    });
 
-        if (node.is_dir) {
-            return `
-                <div class="tree-node status-same">
-                    <details ${isRoot ? 'open' : ''}>
-                        <summary>${rowHtml}</summary>
-                        <div class="tree-children">${children.map((child) => build(child)).join('')}</div>
-                    </details>
-                </div>
-            `;
-        }
+    if (node.is_other || !node.is_dir || !children.length) {
         return `<div class="tree-node status-same">${rowHtml}</div>`;
     }
 
-    panel.classList.remove('empty-state');
-    panel.innerHTML = build(spaceData, true);
+    const nodeId = registerSpaceTreeNode(node);
+    const childHtml = isRoot ? renderSpaceTreeChildren(node) : '';
+    return `
+        <div class="tree-node status-same">
+            <details data-space-node-id="${nodeId}" data-loaded="${isRoot ? 'true' : 'false'}" ${isRoot ? 'open' : ''}>
+                <summary>${rowHtml}</summary>
+                <div class="tree-children">${childHtml}</div>
+            </details>
+        </div>
+    `;
+}
+
+function registerSpaceTreeNode(node) {
+    const nodeId = String(spaceTreeNodeMap.size + 1);
+    spaceTreeNodeMap.set(nodeId, node);
+    return nodeId;
+}
+
+function renderSpaceTreeChildren(node) {
+    const children = aggregateSpaceChildren(node.children || [], SPACE_TREE_CHILD_LIMIT);
+    if (!children.length) {
+        return '<div class="tree-empty-note">没有子项</div>';
+    }
+
+    const parts = [];
+    for (const child of children) {
+        if (spaceTreeRenderedCount >= SPACE_TREE_LIMIT) {
+            parts.push(renderSpaceTreeLimitNote());
+            break;
+        }
+        const childHtml = buildSpaceTreeNode(child, false);
+        if (childHtml) {
+            parts.push(childHtml);
+        }
+    }
+    return parts.join('') || renderSpaceTreeLimitNote();
+}
+
+function handleSpaceTreeToggle(event) {
+    const details = event.target;
+    if (!details.matches('#spaceTree details[data-space-node-id]') || !details.open) {
+        return;
+    }
+    loadSpaceTreeDetails(details);
+}
+
+function loadSpaceTreeDetails(details) {
+    if (details.dataset.loaded === 'true') {
+        return;
+    }
+
+    const node = spaceTreeNodeMap.get(details.dataset.spaceNodeId);
+    const childrenContainer = Array.from(details.children).find((child) => (
+        child.classList && child.classList.contains('tree-children')
+    ));
+    if (!node || !childrenContainer) {
+        return;
+    }
+
+    childrenContainer.innerHTML = renderSpaceTreeChildren(node);
+    details.dataset.loaded = 'true';
+}
+
+function expandSpaceTree() {
+    let guard = 0;
+    while (guard < SPACE_TREE_LIMIT) {
+        const detailsList = Array.from(document.querySelectorAll('#spaceTree details'));
+        const closedOrUnloaded = detailsList.filter((detail) => !detail.open || detail.dataset.loaded !== 'true');
+        if (!closedOrUnloaded.length || spaceTreeRenderedCount >= SPACE_TREE_LIMIT) {
+            break;
+        }
+
+        closedOrUnloaded.forEach((detail) => {
+            detail.open = true;
+            loadSpaceTreeDetails(detail);
+        });
+        guard += 1;
+    }
+}
+
+function renderSpaceTreeLimitNote() {
+    return `<div class="tree-empty-note">已达到 ${formatCount(SPACE_TREE_LIMIT)} 个节点的显示上限；展开更具体的目录或重新扫描较小范围可继续查看。</div>`;
 }
 
 function collectSpaceNodes(node, items = []) {
